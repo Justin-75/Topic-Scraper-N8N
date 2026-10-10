@@ -1,0 +1,2130 @@
+{
+  "name": "Topic Scraper Improved",
+  "nodes": [
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.tavily.com/search",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBearerAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"query\": {{ JSON.stringify($json.query) }},\n  \"search_depth\": \"basic\",\n  \"max_results\": 10\n}",
+        "options": {}
+      },
+      "id": "4da539cc-c4d6-4df4-8e47-5719e40749b2",
+      "name": "Tavily Search",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 3,
+      "position": [
+        -3680,
+        496
+      ],
+      "credentials": {
+        "httpBearerAuth": {
+          "id": "0rKAfDvTQ4C93Vmi",
+          "name": "Bearer Auth account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "search",
+        "options": {}
+      },
+      "id": "8df23578-aada-4f78-a09d-ef01972b07c2",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [
+        -4752,
+        672
+      ],
+      "webhookId": "12c0d2c7-5562-4d7b-bf15-872c6c2e746f"
+    },
+    {
+      "parameters": {
+        "jsCode": "\n\n\n\n// 1. Grab the text from the previous Gemini node\n// We look deep into the 'content.parts[0].text' structure shown in your screenshot\nconst rawText = $input.first().json.text;\n\n// 2. Clean it up (Gemini sometimes adds ```json markers)\nconst cleanText = rawText.replace(/```json|```/g, '').trim();\n\n// 3. Parse the string into a real JSON Object\nconst aiData = JSON.parse(cleanText);\n\n// 4. Output 5 separate items (one for each query)\n// We also pass along the 'category' and 'brief' so you can use them later!\nreturn aiData.queries.map(q => {\n  return {\n    json: {\n      query: q,\n      category: aiData.category,\n      brief: aiData.brief\n    }\n  }\n});"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -3856,
+        496
+      ],
+      "id": "66c4f408-2ef5-408c-a446-758d7410a4e1",
+      "name": "Query Splitter"
+    },
+    {
+      "parameters": {
+        "jsCode": "// CONFIGURATION\nconst MIN_DURATION_MINUTES = 15; // minimum duration in minutes\nconst BANNED_KEYWORDS = [\n  \"reacts\",\n  \"reaction\",\n  \"reacting\",\n  \"reacted\",\n  \"trailer\",\n  \"teaser\",\n  \"short\",\n  \"gameplay\",\n  \"top 10\",\n  \"must watch\",\n  \"easiest\"\n];\n\n// Helpers\nfunction escapeRegex(str) {\n  return str.replace(/[.*+?^${}()|[\\]\\\\]/g, \"\\\\$&\");\n}\n\n// ISO-8601 duration parser: PT#H#M#S\nfunction parseIsoDurationToMinutes(durationRaw = \"PT0S\") {\n  const m = durationRaw.match(/PT(?:(\\d+)H)?(?:(\\d+)M)?(?:(\\d+)S)?/);\n  const hours = parseInt(m?.[1] || \"0\", 10);\n  const minutes = parseInt(m?.[2] || \"0\", 10);\n  const seconds = parseInt(m?.[3] || \"0\", 10);\n  return hours * 60 + minutes + seconds / 60;\n}\n\n// Exact matching:\n// - Single words: whole-word boundary match (react != reaction)\n// - Phrases (contain space): match as whole phrase with boundaries around it (top 10 != top 100)\nfunction hasBannedKeyword(text, bannedList) {\n  return bannedList.some((kw) => {\n    const escaped = escapeRegex(kw.trim().toLowerCase());\n\n    // if it's a phrase (contains whitespace), match phrase with boundaries at ends\n    if (/\\s/.test(kw)) {\n      // boundaries: start/end or non-word chars around the phrase\n      // also allow spaces inside phrase exactly\n      const re = new RegExp(`(^|[^\\\\w])${escaped}([^\\\\w]|$)`, \"i\");\n      return re.test(text);\n    }\n\n    // single word: whole word only\n    const re = new RegExp(`\\\\b${escaped}\\\\b`, \"i\");\n    return re.test(text);\n  });\n}\n\nreturn items.filter((item) => {\n  const videoData = item.json.items?.[0] || {};\n  const snippet = videoData.snippet || {};\n  const content = videoData.contentDetails || {};\n\n  // 1) DURATION CHECK\n  const durationRaw = content.duration || \"PT0S\";\n  const totalMinutes = parseIsoDurationToMinutes(durationRaw);\n\n  if (totalMinutes < MIN_DURATION_MINUTES) return false;\n\n  // 2) KEYWORD CHECK (Title & Tags)\n  const title = snippet.title || \"\";\n  const tags = Array.isArray(snippet.tags) ? snippet.tags.join(\" \") : \"\";\n\n  // Normalize text: lowercase + collapse whitespace\n  const textToCheck = (title + \" \" + tags)\n    .toLowerCase()\n    .replace(/\\s+/g, \" \")\n    .trim();\n\n  if (hasBannedKeyword(textToCheck, BANNED_KEYWORDS)) return false;\n\n  return true;\n});\n"
+      },
+      "id": "2584b2a7-d050-4a09-bc03-2b453314d458",
+      "name": "Youtube Filter",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -3248,
+        -240
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Ambil teks JSON dari output Gemini\nconst rawText = $input.first().json.text\n// Bersihkan teks jika Gemini menyertakan markdown ```json ... ```\nconst cleanJson = rawText.replace(/```json|```/g, \"\").trim();\n\n// Ubah teks menjadi objek JavaScript\nconst data = JSON.parse(cleanJson);\n\n// Pecah menjadi item individu untuk n8n\nreturn data.youtube_queries.map(query => {\n  return {\n    json: {\n      query: query, // read by \"Get many videos\" and \"Search TERM\"\n      search_term: query\n    }\n  };\n});\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -3744,
+        -240
+      ],
+      "id": "e92e8e28-ca86-4d1e-ab67-ba0ff2ef60de",
+      "name": "Youtube Splitter"
+    },
+    {
+      "parameters": {
+        "url": "https://www.googleapis.com/youtube/v3/videos",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "oAuth2Api",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "id",
+              "value": "={{ $json.id.videoId }}"
+            },
+            {
+              "name": "part",
+              "value": "snippet,contentDetails,statistics"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        -3392,
+        -240
+      ],
+      "id": "fb0e03b3-2d64-49b7-9b1f-10c0fc6a3d72",
+      "name": "Youtube GET",
+      "retryOnFail": true,
+      "waitBetweenTries": 5000,
+      "credentials": {
+        "oAuth2Api": {
+          "id": "cgbnCpDCK3Q9I1hk",
+          "name": "Unnamed credential"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// n8n Code node - \"Run once for all items\"\n// Parses Gemini JSON, then selects Top-3 per query with bucket diversity and global URL dedupe.\n\nconst j = $input.first().json.text;\n\nconst rawText =\n  $input.first().json.text ??\n  j?.content?.parts?.[0]?.text ??\n  j?.content?.[0]?.text ??\n  j?.text ??\n  \"\";\n\nif (!rawText) throw new Error(\"No Gemini text found (expected content.parts[0].text).\");\n\n// Strip code fences if they appear\nlet cleaned = String(rawText)\n  .trim()\n  .replace(/^```json\\s*/i, \"\")\n  .replace(/^```\\s*/i, \"\")\n  .replace(/```$/i, \"\")\n  .trim();\n\nfunction canonicalizeUrl(url) {\n  try {\n    const u = new URL(String(url));\n    const drop = new Set([\"utm_source\",\"utm_medium\",\"utm_campaign\",\"utm_term\",\"utm_content\",\"ref\",\"fbclid\",\"gclid\",\"igshid\"]);\n    [...u.searchParams.keys()].forEach(k => { if (drop.has(k.toLowerCase())) u.searchParams.delete(k); });\n    u.hash = \"\";\n    u.protocol = \"https:\";\n    u.hostname = u.hostname.replace(/^www\\./i, \"\");\n    u.pathname = u.pathname.replace(/\\/+$/, \"\");\n    return u.toString();\n  } catch {\n    return String(url ?? \"\");\n  }\n}\n\nfunction parseJsonLoose(text) {\n  try {\n    const p = JSON.parse(text);\n    return typeof p === \"string\" ? JSON.parse(p) : p;\n  } catch (e1) {\n    const start = text.indexOf(\"{\");\n    const end = text.lastIndexOf(\"}\");\n    if (start !== -1 && end !== -1 && end > start) {\n      const chunk = text.slice(start, end + 1)\n        .replace(/\\\\n/g, \"\\n\")\n        .replace(/\\\\\"/g, '\"')\n        .replace(/\\\\\\\\/g, \"\\\\\");\n      const p = JSON.parse(chunk);\n      return typeof p === \"string\" ? JSON.parse(p) : p;\n    }\n    throw new Error(\"Failed to parse Gemini JSON. First 300 chars: \" + text.slice(0, 300));\n  }\n}\n\nconst parsed = parseJsonLoose(cleaned);\nconst topics = Array.isArray(parsed?.results_by_topic) ? parsed.results_by_topic : [];\n\nconst TOP_PER_QUERY = 3;\n\nconst usedUrls = new Set();\nconst out = [];\n\nfor (const topic of topics) {\n  const queryName = topic?.topic_query ?? topic?.search_term ?? topic?.query ?? \"UNKNOWN_QUERY\";\n\n  const sources =\n    (Array.isArray(topic?.ranked_sources) && topic.ranked_sources) ||\n    (Array.isArray(topic?.selected_sources) && topic.selected_sources) ||\n    (Array.isArray(topic?.selected_videos) && topic.selected_videos) ||\n    (Array.isArray(topic?.results) && topic.results) ||\n    [];\n\n  // Normalize and sort by weighted_score desc\n  const norm = sources.map(s => {\n    const url = canonicalizeUrl(s?.url ?? s?.Website_url ?? s?.WebsiteUrl ?? s?.source_id ?? \"\");\n    const title = s?.title ?? \"No Title\";\n    const bucket = String(s?.bucket ?? \"N/A\");\n    const quality_score = Number(s?.quality_score ?? s?.qualityScore ?? 0) || 0;\n    const confidence = Number(s?.confidence ?? 0) || 0;\n    const score = Number(s?.weighted_score ?? s?.weightedScore ?? s?.score ?? 0) || 0;\n    const reason = s?.reason ?? \"\";\n    return { url, title, bucket, quality_score, confidence, score, reason };\n  }).filter(s => s.url);\n\n  norm.sort((a,b) => b.score - a.score);\n\n  const selected = [];\n  const usedBuckets = new Set();\n\n  // Pass 1: prefer new buckets + unused URLs\n  for (const s of norm) {\n    if (selected.length >= TOP_PER_QUERY) break;\n    const key = s.url;\n    if (usedUrls.has(key)) continue;\n    if (usedBuckets.has(s.bucket)) continue;\n    selected.push(s);\n    usedUrls.add(key);\n    usedBuckets.add(s.bucket);\n  }\n\n  // Pass 2: fill remaining with unused URLs\n  for (const s of norm) {\n    if (selected.length >= TOP_PER_QUERY) break;\n    const key = s.url;\n    if (usedUrls.has(key)) continue;\n    selected.push(s);\n    usedUrls.add(key);\n  }\n\n  // Pass 3: if still short, allow duplicates across queries (avoid duplicates inside this query)\n  for (const s of norm) {\n    if (selected.length >= TOP_PER_QUERY) break;\n    const key = s.url;\n    if (selected.some(x => x.url === key)) continue;\n    selected.push(s);\n  }\n\n  selected.forEach((s, i) => {\n    out.push({\n      json: {\n        idx: `${queryName}#${String(i+1).padStart(2,\"0\")}`,\n        title: s.title,\n        url: s.url,\n        url_canonical: s.url,\n        score: s.score,\n        bucket: s.bucket,\n        quality_score: s.quality_score,\n        confidence: s.confidence,\n        reason: s.reason,\n        search_term: queryName,\n      }\n    });\n  });\n}\n\nreturn out;"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -2608,
+        560
+      ],
+      "id": "9fcf3ae1-25de-4f3a-b24f-8b55b90d264a",
+      "name": "Top K retrieval web",
+      "alwaysOutputData": false
+    },
+    {
+      "parameters": {
+        "jsCode": "// n8n Code node (Run once for all items)\n// Select Top 3 videos per search_term/topic_query with global videoId dedupe.\n\nconst first = $input.first().json.text;\n\nconst rawText = $input.first().json.text ??\n  first?.content?.parts?.[0]?.text ??\n  first?.content?.[0]?.text ??\n  first?.text ??\n  first?.content ??\n  \"\";\n\nif (!rawText) {\n  throw new Error(\"No Gemini text found. Check path: content.parts[0].text\");\n}\n\n// Strip code fences\nconst cleaned = String(rawText)\n  .trim()\n  .replace(/^```json\\s*/i, \"\")\n  .replace(/^```\\s*/i, \"\")\n  .replace(/```$/i, \"\")\n  .trim();\n\nlet parsed;\ntry {\n  parsed = JSON.parse(cleaned);\n  if (typeof parsed === \"string\") parsed = JSON.parse(parsed);\n} catch (e) {\n  throw new Error(\"Failed to parse Gemini JSON. First 300 chars: \" + cleaned.slice(0, 300));\n}\n\nconst TOP_PER_SEARCH = 3;\n\n// Collect videos grouped by topic_query\nlet rows = [];\n\nif (Array.isArray(parsed?.results_by_topic)) {\n  for (const t of parsed.results_by_topic) {\n    const group = t?.topic_query ?? t?.search_term ?? t?.query ?? \"UNKNOWN_QUERY\";\n    const videos =\n      (Array.isArray(t?.rated_videos) && t.rated_videos) ||\n      (Array.isArray(t?.ranked_videos) && t.ranked_videos) ||\n      (Array.isArray(t?.selected_videos) && t.selected_videos) ||\n      [];\n    for (const v of videos) rows.push({ ...v, _group: group });\n  }\n} else {\n  const rated = parsed?.rated_videos ?? parsed?.results ?? parsed?.items ?? [];\n  for (const v of rated) {\n    const group = v?.search_term ?? v?.topic_query ?? v?.query ?? \"UNKNOWN_QUERY\";\n    rows.push({ ...v, _group: group });\n  }\n}\n\n// Group by search term\nconst groups = new Map();\nfor (const v of rows) {\n  const g = String(v._group || \"UNKNOWN_QUERY\");\n  if (!groups.has(g)) groups.set(g, []);\n  groups.get(g).push(v);\n}\n\nif (groups.size === 1 && groups.has(\"UNKNOWN_QUERY\")) {\n  throw new Error(\"All items grouped into UNKNOWN_QUERY. Gemini output lacks topic_query/search_term grouping.\");\n}\n\nconst usedIds = new Set();\nlet selected = [];\n\n// Select top 3 per group with global dedupe\nfor (const [g, arr] of groups.entries()) {\n  arr.sort((a, b) => (Number(b.score) || 0) - (Number(a.score) || 0));\n  const picked = [];\n\n  // pass 1: unique ids\n  for (const v of arr) {\n    if (picked.length >= TOP_PER_SEARCH) break;\n    const id = v.video_id ?? v.videoId ?? v.id ?? \"\";\n    if (!id) continue;\n    if (usedIds.has(id)) continue;\n    picked.push(v);\n    usedIds.add(id);\n  }\n\n  // pass 2: allow duplicates if needed\n  for (const v of arr) {\n    if (picked.length >= TOP_PER_SEARCH) break;\n    const id = v.video_id ?? v.videoId ?? v.id ?? \"\";\n    if (!id) continue;\n    if (picked.some(x => (x.video_id ?? x.videoId ?? x.id) === id)) continue;\n    picked.push(v);\n  }\n\n  picked.forEach(v => selected.push({ ...v, _group: g }));\n}\n\n// Output items\nreturn selected.map((v, i) => ({\n  json: {\n    idx: String(i).padStart(5, \"0\"),\n    video_id: v.video_id ?? v.videoId ?? v.id ?? \"\",\n    title: v.title ?? \"\",\n    channel: v.channel ?? \"\",\n    score: Number(v.score) || 0,\n    tag: v.tag ?? \"\",\n    reason: v.reason ?? \"\",\n    search_term: v._group ?? \"\",\n  }\n}));"
+      },
+      "id": "0442fdf5-de95-4f26-a19a-6bf493aabc7d",
+      "name": "Top K retrieval yt",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -2432,
+        -240
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "documentURL": "={{$items(\"Create a document\")[0].json.id}}",
+        "actionsUi": {
+          "actionFields": [
+            {
+              "action": "insert",
+              "text": "={{ $json.doc_text }}"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.googleDocs",
+      "typeVersion": 2,
+      "position": [
+        -4272,
+        864
+      ],
+      "id": "eec24dad-aa01-488b-b7f5-3322a2839893",
+      "name": "Final Document",
+      "credentials": {
+        "googleDocsOAuth2Api": {
+          "id": "kXIFBJJjWXO31AXF",
+          "name": "Childgamings"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "resource": "video",
+        "limit": 8,
+        "filters": {
+          "q": "={{ $json.query }}"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.youTube",
+      "typeVersion": 1,
+      "position": [
+        -3568,
+        -240
+      ],
+      "id": "8e32c39d-3195-4b43-a5da-48360cd0ef0d",
+      "name": "Get many videos",
+      "credentials": {
+        "youTubeOAuth2Api": {
+          "id": "1sAK02UWLOtrFT7B",
+          "name": "YouTube account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "fieldsToAggregate": {
+          "fieldToAggregate": [
+            {
+              "fieldToAggregate": "items[0].id"
+            },
+            {
+              "fieldToAggregate": "items[0].snippet.title"
+            },
+            {
+              "fieldToAggregate": "items[0].snippet.description"
+            },
+            {
+              "fieldToAggregate": "items[0].snippet.channelTitle",
+              "renameField": true,
+              "outputFieldName": "channel"
+            },
+            {
+              "fieldToAggregate": "search_term"
+            },
+            {
+              "fieldToAggregate": "items[0].snippet.publishedAt",
+              "renameField": true,
+              "outputFieldName": "publishedAt"
+            },
+            {
+              "fieldToAggregate": "items[0].contentDetails.duration",
+              "renameField": true,
+              "outputFieldName": "duration"
+            },
+            {
+              "fieldToAggregate": "items[0].statistics.viewCount",
+              "renameField": true,
+              "outputFieldName": "viewCount"
+            },
+            {
+              "fieldToAggregate": "items[0].statistics.likeCount",
+              "renameField": true,
+              "outputFieldName": "likeCount"
+            }
+          ]
+        },
+        "options": {
+          "mergeLists": true,
+          "keepMissing": true
+        }
+      },
+      "type": "n8n-nodes-base.aggregate",
+      "typeVersion": 1,
+      "position": [
+        -2944,
+        -240
+      ],
+      "id": "df5bbe9b-dc29-4468-8dac-1ac0a82f767e",
+      "name": "Aggregate"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "93bce154-f5ab-4705-afd5-5b9a9d494379",
+              "name": "items",
+              "value": "={{ $json.items }}",
+              "type": "array"
+            },
+            {
+              "id": "74842d01-b2e7-415c-965f-707c4c0a5014",
+              "name": "search_term",
+              "value": "={{ $('Youtube Splitter').item.json.query }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        -3088,
+        -240
+      ],
+      "id": "44103915-b5cc-441e-9bd2-bd81b5e3e835",
+      "name": "Search TERM"
+    },
+    {
+      "parameters": {
+        "content": "Improvement: \n1. BIkin LOOP di classfier pastikan ada 15 video kalo belum, retrieve query dari youtube filter lagi tapi khusus query yang video nya kurang"
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -2784,
+        -384
+      ],
+      "id": "45174bcb-bc90-4465-b39f-c098d097785b",
+      "name": "Sticky Note"
+    },
+    {
+      "parameters": {
+        "content": "Youtube Classifier: Scoring berdasarkan scoring rubric. \n\nWebsite Classifier: 5 way vector + Weighted score (Confidence * Overall Score) ",
+        "width": 448
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -3296,
+        352
+      ],
+      "id": "57eeb89d-e674-4c56-ac6a-c43df3b786a7",
+      "name": "Sticky Note1"
+    },
+    {
+      "parameters": {
+        "content": "Improvement: \n1. BIkin LOOP di classfier pastikan ada 15 video kalo belum, retrieve query dari youtube filter lagi tapi khusus query yang video nya kurang\n\n2. Ganti bagian extract text, untuk pick web nya ?? ",
+        "width": 864
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -4400,
+        1152
+      ],
+      "id": "d294907b-6d34-41ff-941f-658440a8396b",
+      "name": "Sticky Note2"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Attach stable videoId + channel (and other metadata) using video_id lookup (not title).\n\nconst agg = $node[\"Aggregate\"].json;\n\nconst ids = agg.id || [];\nconst titles = agg.title || [];\nconst descriptions = agg.description || [];\nconst channels = agg.channel || [];\nconst searchTerms = agg.search_term || [];\nconst publishedAts = agg.publishedAt || [];\nconst durations = agg.duration || [];\nconst viewCounts = agg.viewCount || [];\nconst likeCounts = agg.likeCount || [];\n\nif (!Array.isArray(ids)) throw new Error(\"Aggregate node must output array: id[]\");\n\nconst metaById = new Map();\nfor (let i = 0; i < ids.length; i++) {\n  const id = String(ids[i] ?? \"\");\n  if (!id || metaById.has(id)) continue;\n  metaById.set(id, {\n    title: titles[i] ?? \"\",\n    description: descriptions[i] ?? \"\",\n    channel: channels[i] ?? \"Unknown Channel\",\n    search_term: searchTerms[i] ?? \"\",\n    publishedAt: publishedAts[i] ?? null,\n    duration: durations[i] ?? null,\n    viewCount: viewCounts[i] ?? null,\n    likeCount: likeCounts[i] ?? null,\n  });\n}\n\nreturn $input.all().map((item) => {\n  const vid = String(item.json.video_id ?? item.json.videoId ?? item.json.id ?? \"\");\n  const meta = metaById.get(vid);\n\n  return {\n    json: {\n      ...item.json,\n      videoId: vid || null,\n      url: vid ? `https://www.youtube.com/watch?v=${vid}` : (item.json.url ?? \"\"),\n      title: item.json.title || (meta?.title ?? \"\"),\n      channel: item.json.channel || (meta?.channel ?? \"Unknown Channel\"),\n      description: meta?.description ?? item.json.description ?? \"\",\n      publishedAt: meta?.publishedAt ?? item.json.publishedAt ?? null,\n      duration: meta?.duration ?? item.json.duration ?? null,\n      viewCount: meta?.viewCount ?? item.json.viewCount ?? null,\n      likeCount: meta?.likeCount ?? item.json.likeCount ?? null,\n      search_term: item.json.search_term || meta?.search_term || \"\",\n    }\n  };\n});"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -2256,
+        -240
+      ],
+      "id": "a1988953-99a0-4542-a9a7-544f3ab06e3a",
+      "name": "Video ID Retriever"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "// Clean WebVTT/SRT-like transcripts and output a stable schema.\n// Mode: Run Once for Each Item\n\nfunction cleanWebVTT(text) {\n  if (!text) return \"\";\n\n  return String(text)\n    .replace(/^\\uFEFF?WEBVTT[^\\n]*\\n/gi, \"\") // Remove WEBVTT header line\n    .replace(/^\\s*\\d+\\s*$/gm, \"\")            // Remove cue numbers (lines that are ONLY digits)\n    .replace(\n      /^\\s*\\d{1,2}:\\d{2}(?::\\d{2})?\\.\\d{3}\\s*-->\\s*\\d{1,2}:\\d{2}(?::\\d{2})?\\.\\d{3}.*$/gm,\n      \"\"\n    )                                       // Remove timestamp lines\n    .replace(/<[^>]*>/g, \"\")                // Strip tags\n    .replace(/[ \\t]+\\n/g, \"\\n\")\n    .replace(/\\n{2,}/g, \"\\n\")\n    .trim();\n}\n\nconst input = $json || {};\n\nconst videoId = input.videoId ?? input.video_id ?? input.id ?? null;\nconst title = input.title ?? \"\";\nconst rawTranscript =\n  input.transcript ?? input.data ?? input.text ?? \"\";\n\n// Hard-cap length so every transcript fits in the one LLM call that follows\n// (same idea as MAX_CHARS in \"Clean Content\"). Raise or lower to taste.\nconst MAX_TRANSCRIPT_CHARS = 20000;\n\nlet cleaned = cleanWebVTT(rawTranscript);\nif (cleaned.length > MAX_TRANSCRIPT_CHARS) {\n  cleaned = cleaned.slice(0, MAX_TRANSCRIPT_CHARS) + \"\\n\\n[TRUNCATED]\";\n}\n\nreturn {\n  json: {\n    videoId,\n    video_id: input.video_id ?? videoId,  // keep both keys for downstream joins\n    title,\n    transcript_text: cleaned,\n    transcript_ok:\n      input.status ?? input.ok ?? (rawTranscript ? \"ok\" : \"missing\"),\n    transcript_len: cleaned.length,\n  },\n};\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -3632,
+        -16
+      ],
+      "id": "294cc09e-37c2-45ca-8b0b-2457204c868f",
+      "name": "Cleaner + Parser"
+    },
+    {
+      "parameters": {
+        "options": {
+          "reset": false
+        }
+      },
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [
+        -4160,
+        160
+      ],
+      "id": "575d9677-75de-4c01-bbaf-67f2c84decf4",
+      "name": "Loop Over Items"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "77cc24bb-44d1-4dca-a673-6eeee677c83b",
+              "leftValue": "={{ $json.transcript }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "notEmpty",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.filter",
+      "typeVersion": 2.3,
+      "position": [
+        -3920,
+        -16
+      ],
+      "id": "60619d80-9fba-4337-8076-b903a8ab0c79",
+      "name": "Filter"
+    },
+    {
+      "parameters": {
+        "mode": "combine",
+        "fieldsToMatchString": "videoId",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        -3152,
+        96
+      ],
+      "id": "247c38c8-1ad3-424f-b748-f81cf263e538",
+      "name": "Merge All Input"
+    },
+    {
+      "parameters": {
+        "aggregate": "aggregateAllItemData",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.aggregate",
+      "typeVersion": 1,
+      "position": [
+        -2992,
+        64
+      ],
+      "id": "27dc9b73-6c41-4a59-bfa8-3a93a8986a14",
+      "name": "Aggregate Data"
+    },
+    {
+      "parameters": {
+        "batchSize": 2,
+        "options": {}
+      },
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [
+        -2688,
+        16
+      ],
+      "id": "904b19a3-b059-45ff-a777-1c14da3d93c9",
+      "name": "Loop Over Items1"
+    },
+    {
+      "parameters": {
+        "jsCode": "// n8n Code node (Run once for all items)\n// Combines Tavily search results across queries, preserves per-query provenance,\n// canonicalizes URLs, computes deterministic scores, and prefilters top-N per query.\n\nconst PREFILTER_PER_QUERY = 12; // keep this many per search term for LLM judging\nconst MIN_WORD_LEN = 3;\n\nfunction canonicalizeUrl(url) {\n  try {\n    const u = new URL(String(url));\n    // drop common tracking params\n    const drop = new Set([\"utm_source\",\"utm_medium\",\"utm_campaign\",\"utm_term\",\"utm_content\",\"ref\",\"fbclid\",\"gclid\",\"igshid\"]);\n    [...u.searchParams.keys()].forEach(k => { if (drop.has(k.toLowerCase())) u.searchParams.delete(k); });\n    u.hash = \"\";\n    // normalize\n    u.protocol = \"https:\";\n    u.hostname = u.hostname.replace(/^www\\./i, \"\");\n    // remove trailing slash\n    u.pathname = u.pathname.replace(/\\/+$/, \"\");\n    return u.toString();\n  } catch {\n    return String(url ?? \"\");\n  }\n}\n\nfunction domainFromUrl(url) {\n  try { return new URL(url).hostname.toLowerCase(); } catch { return \"\"; }\n}\n\nfunction authorityHeuristic(domain) {\n  const d = (domain || \"\").toLowerCase();\n  if (!d) return 50;\n  if (/\\.(gov|edu)$/.test(d)) return 95;\n  if (/arxiv\\.org|acm\\.org|ieee\\.org|nature\\.com|science\\.org|openai\\.com|nvidia\\.com|cloudflare\\.com/.test(d)) return 90;\n  if (/github\\.com|docs\\./.test(d)) return 75;\n  if (/medium\\.com|substack\\.com/.test(d)) return 45;\n  if (/reddit\\.com|tiktok\\.com|facebook\\.com|instagram\\.com/.test(d)) return 20;\n  return 55;\n}\n\nfunction paywallRisk(url) {\n  const u = (url || \"\").toLowerCase();\n  if (/ft\\.com|wsj\\.com|bloomberg\\.com|economist\\.com/.test(u)) return 1.0;\n  return 0.0;\n}\n\nfunction tokenize(s) {\n  return String(s || \"\")\n    .toLowerCase()\n    .replace(/[^\\p{L}\\p{N}\\s]/gu, \" \")\n    .split(/\\s+/)\n    .filter(w => w && w.length >= MIN_WORD_LEN);\n}\n\nfunction overlapScore(query, text) {\n  const q = tokenize(query);\n  const t = String(text || \"\").toLowerCase();\n  if (!q.length) return 0;\n  let hits = 0;\n  for (const w of q) if (t.includes(w)) hits++;\n  return Math.round((hits / q.length) * 100);\n}\n\n// 1) Flatten per-query results and preserve the originating search term\nlet candidates = [];\n\nfor (const item of items) {\n  const results = item.json.results || [];\n  const search_term = item.json.query || item.json.search_term || \"\";\n  const query_category = item.json.category ?? null;\n  const brief = item.json.brief ?? null;\n\n  // Deduplicate within THIS query by canonical URL\n  const seen = new Set();\n\n  results.forEach((r, rank) => {\n    const url_raw = r.url || \"\";\n    const url = canonicalizeUrl(url_raw);\n    if (!url || seen.has(url)) return;\n    seen.add(url);\n\n    const title = r.title || \"\";\n    const snippet = r.content || \"\";\n\n    const domain = domainFromUrl(url);\n    const authority = authorityHeuristic(domain);\n    const relevance = Math.max(\n      overlapScore(search_term, title),\n      Math.round(0.7 * overlapScore(search_term, title) + 0.3 * overlapScore(search_term, snippet))\n    );\n\n    // cheap proxy (real text comes later in extract step)\n    const len = snippet.length;\n    const lengthScore = len < 250 ? 15 : len < 1200 ? 70 : 50;\n\n    const paywallPenalty = paywallRisk(url) * 15;\n\n    const score_det = Math.round(\n      0.30 * authority +\n      0.30 * relevance +\n      0.10 * lengthScore -\n      paywallPenalty\n    );\n\n    candidates.push({\n      title,\n      url,\n      content: snippet,\n      search_term,\n      query_category,\n      brief,\n      tavily_rank: rank + 1,\n      domain,\n      score_det,\n      score_features: { authority, relevance, lengthScore, paywallPenalty }\n    });\n  });\n}\n\n// 2) Prefilter top-N per search term (keeps diversity across intents)\nconst byQuery = new Map();\nfor (const c of candidates) {\n  const q = String(c.search_term || \"UNKNOWN_QUERY\");\n  if (!byQuery.has(q)) byQuery.set(q, []);\n  byQuery.get(q).push(c);\n}\n\nlet prefiltered = [];\nfor (const [q, arr] of byQuery.entries()) {\n  arr.sort((a,b) => (b.score_det - a.score_det) || (a.tavily_rank - b.tavily_rank));\n  prefiltered.push(...arr.slice(0, PREFILTER_PER_QUERY));\n}\n\n// 3) Output one object containing all prefiltered candidates\nreturn [{\n  json: {\n    candidates: prefiltered,\n    brief: items[0]?.json?.brief ?? null,\n    category: items[0]?.json?.category ?? null\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -3488,
+        496
+      ],
+      "id": "a80b27bd-78c2-4734-b251-29f6ad090604",
+      "name": "Aggregator (Remove Dupes) "
+    },
+    {
+      "parameters": {
+        "sortFieldsUi": {
+          "sortField": [
+            {
+              "fieldName": "bucket",
+              "order": "descending"
+            },
+            {
+              "fieldName": "score",
+              "order": "descending"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.sort",
+      "typeVersion": 1,
+      "position": [
+        -2352,
+        592
+      ],
+      "id": "31167178-e0e3-4408-9024-11d0902d9e16",
+      "name": "Sort"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.tavily.com/extract",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBearerAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"urls\": [\"{{ $json.url }}\"]\n}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        -1760,
+        624
+      ],
+      "id": "48191165-92cb-4e29-82f0-e67d91474721",
+      "name": "Extract Text",
+      "credentials": {
+        "httpBearerAuth": {
+          "id": "0rKAfDvTQ4C93Vmi",
+          "name": "Bearer Auth account"
+        }
+      }
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        -2048,
+        1040
+      ],
+      "id": "36f02304-b4ce-4d13-8c7e-90f75f9de205",
+      "name": "Merge1"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "64e19136-23b8-4985-8ff9-26f883420b93",
+              "leftValue": "={{ $json.url }}",
+              "rightValue": "github.com",
+              "operator": {
+                "type": "string",
+                "operation": "contains"
+              }
+            },
+            {
+              "id": "e35c9b1e-aa57-46cb-a16b-22825edd0a85",
+              "leftValue": "",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        -2032,
+        592
+      ],
+      "id": "8e2eaf1f-6544-4ce3-ab42-bb31f7f96cac",
+      "name": "If"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Clean + normalize extracted text, canonicalize URL, and hard-cap length to keep LLM calls stable.\n\nfunction canonicalizeUrl(url) {\n  try {\n    const u = new URL(String(url));\n    const drop = new Set([\"utm_source\",\"utm_medium\",\"utm_campaign\",\"utm_term\",\"utm_content\",\"ref\",\"fbclid\",\"gclid\",\"igshid\"]);\n    [...u.searchParams.keys()].forEach(k => { if (drop.has(k.toLowerCase())) u.searchParams.delete(k); });\n    u.hash = \"\";\n    u.protocol = \"https:\";\n    u.hostname = u.hostname.replace(/^www\\./i, \"\");\n    u.pathname = u.pathname.replace(/\\/+$/, \"\");\n    return u.toString();\n  } catch {\n    return String(url ?? \"\");\n  }\n}\n\nconst MAX_CHARS = 20000;\n\nreturn $input.all().map(item => {\n  const rawContent =\n    (item.json.results && item.json.results[0] ? item.json.results[0].raw_content : item.json.data) ||\n    \"\";\n\n  const sourceUrl =\n    (item.json.results && item.json.results[0] ? item.json.results[0].url : item.json.url) ||\n    \"\";\n\n  let text = String(rawContent || \"\")\n    .replace(/\\r/g, \"\")\n    .replace(/\\n\\s*\\n/g, \"\\n\")\n    .trim();\n\n  if (text.length > MAX_CHARS) {\n    text = text.slice(0, MAX_CHARS) + \"\\n\\n[TRUNCATED]\";\n  }\n\n  const url = canonicalizeUrl(sourceUrl);\n\n  return {\n    json: {\n      url,\n      url_canonical: url,\n      clean_content: text\n    }\n  };\n});"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1600,
+        640
+      ],
+      "id": "ddecbe27-be3a-4ce4-9f57-a2825e039dc0",
+      "name": "Clean Content"
+    },
+    {
+      "parameters": {
+        "jsCode": "// 1. Get the raw text from the previous node\nconst rawText = $input.first().json.text || \"\"; \n\n// 2. Clean the string (remove markdown code fences if they exist)\nconst cleanedText = rawText.replace(/```json\\n?|```/g, \"\").trim();\n\ntry {\n  // 3. Parse the string into a real JSON array\n  const dataArray = JSON.parse(cleanedText);\n\n  // 4. Return the data as individual items for n8n to loop through\n  return dataArray.map(item => ({ json: item }));\n} catch (error) {\n  // If parsing fails, return the error for debugging\n  return [{ json: { error: \"Failed to parse JSON\", details: error.message, original: rawText } }];\n}"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1440,
+        416
+      ],
+      "id": "ed37b121-c44f-431e-8d64-29aaa7574769",
+      "name": "Content Cleaner"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "cbae6077-5af5-442f-9151-6fa41245c33c",
+              "name": "url",
+              "value": "={{ $json.url }}",
+              "type": "string"
+            },
+            {
+              "id": "d51cf97c-e753-4663-9cb5-e3928b0ab441",
+              "name": "title",
+              "value": "={{ $json.title }}",
+              "type": "string"
+            },
+            {
+              "id": "d4a53aef-ea0e-490d-8bc3-5cbe39e3a4df",
+              "name": "search_term",
+              "value": "={{ $json.search_term }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        -1904,
+        336
+      ],
+      "id": "42152dc9-481c-4bf5-9de2-aac226ae0fc8",
+      "name": "Url Filter"
+    },
+    {
+      "parameters": {
+        "aggregate": "aggregateAllItemData",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.aggregate",
+      "typeVersion": 1,
+      "position": [
+        -1680,
+        288
+      ],
+      "id": "aa36f6c4-ec76-4a53-b478-db9016740943",
+      "name": "Combine Data"
+    },
+    {
+      "parameters": {
+        "mode": "combine",
+        "fieldsToMatchString": "url",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        -1600,
+        848
+      ],
+      "id": "d5200876-d1c8-491f-b546-02272fe7e1b4",
+      "name": "Merge2"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "329d64cf-207e-4e3a-b143-ac004c59e495",
+              "name": "title",
+              "value": "={{ $json.title }}",
+              "type": "string"
+            },
+            {
+              "id": "eee70640-1485-4919-96d4-2992282df52f",
+              "name": "url",
+              "value": "={{ $json.url }}",
+              "type": "string"
+            },
+            {
+              "id": "67f656f3-72d1-4c74-8f85-0525cc333557",
+              "name": "score",
+              "value": "={{ $json.score }}",
+              "type": "number"
+            },
+            {
+              "id": "47c47ed2-c784-4da2-99f6-f213b162d111",
+              "name": "clean_content",
+              "value": "={{ $json.clean_content }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        -1728,
+        1040
+      ],
+      "id": "56367f9d-e9c8-45cf-917d-2ffda1246e35",
+      "name": "Set the last data to merge"
+    },
+    {
+      "parameters": {
+        "mode": "combine",
+        "fieldsToMatchString": "url",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        -2192,
+        864
+      ],
+      "id": "57c1e6f3-d7d6-4a1f-873f-abde0fff00b1",
+      "name": "Merge3"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "9709ce65-50a6-49ac-964d-c170b31bab64",
+              "name": "url",
+              "value": "={{ $json.website }}",
+              "type": "string"
+            },
+            {
+              "id": "a96cd4aa-23d8-4e2b-973f-79976545b5c7",
+              "name": "tittle",
+              "value": "={{ $json.title }}",
+              "type": "string"
+            },
+            {
+              "id": "90a505b2-567c-4f9c-928b-2ca24efc298b",
+              "name": "content",
+              "value": "={{ $json.content }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        -1392,
+        608
+      ],
+      "id": "6dda5ee5-1f6f-41da-9177-46016af6ed16",
+      "name": "Rapihin Data"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "329d64cf-207e-4e3a-b143-ac004c59e495",
+              "name": "title",
+              "value": "={{ $json.title }}",
+              "type": "string"
+            },
+            {
+              "id": "eee70640-1485-4919-96d4-2992282df52f",
+              "name": "url",
+              "value": "={{ $json.url }}",
+              "type": "string"
+            },
+            {
+              "id": "67f656f3-72d1-4c74-8f85-0525cc333557",
+              "name": "score",
+              "value": "={{ $json.score }}",
+              "type": "number"
+            },
+            {
+              "id": "47c47ed2-c784-4da2-99f6-f213b162d111",
+              "name": "clean_content",
+              "value": "={{ $json.content }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        -2032,
+        864
+      ],
+      "id": "273fa03d-8c2b-4069-aa8e-91def73d5b25",
+      "name": "Set the last data to merge1"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Parse JSON printed by the Python transcript script (stdout -> JSON)\nconst stdout = $json.stdout ?? $input.first().json.stdout ?? \"\";\n\nif (!stdout) {\n  return [{ json: { status: \"error\", transcript: \"\", error: \"No stdout from transcript script\" } }];\n}\n\ntry {\n  const parsed = JSON.parse(stdout);\n  return [{ json: parsed }];\n} catch (e) {\n  // Sometimes scripts print extra lines; attempt to extract first {...} or [...] block\n  const s = String(stdout);\n  const firstObj = s.indexOf(\"{\");\n  const lastObj = s.lastIndexOf(\"}\");\n  const firstArr = s.indexOf(\"[\");\n  const lastArr = s.lastIndexOf(\"]\");\n\n  let candidate = \"\";\n  if (firstArr !== -1 && lastArr !== -1 && lastArr > firstArr) candidate = s.slice(firstArr, lastArr + 1);\n  else if (firstObj !== -1 && lastObj !== -1 && lastObj > firstObj) candidate = s.slice(firstObj, lastObj + 1);\n\n  try {\n    const parsed2 = JSON.parse(candidate);\n    return [{ json: parsed2 }];\n  } catch (e2) {\n    return [{ json: { status: \"error\", transcript: \"\", error: \"Failed to parse transcript JSON\", raw_preview: s.slice(0, 400) } }];\n  }\n}"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -3728,
+        176
+      ],
+      "id": "53b6dfbf-31dd-4fc5-a13a-cb4ea17cb446",
+      "name": "Formatter"
+    },
+    {
+      "parameters": {
+        "jsCode": "// 1. Extract the raw text from the AI node\nconst rawText = $input.first().json.text;\n\nif (!rawText) {\n  throw new Error(\"No data received from the AI node.\");\n}\n\n// 2. Clean up the text (removes markdown backticks if the AI included them)\nconst cleanedText = rawText\n  .replace(/```json/g, \"\")\n  .replace(/```/g, \"\")\n  .trim();\n\nlet parsedData;\ntry {\n  parsedData = JSON.parse(cleanedText);\n} catch (error) {\n  throw new Error(\"Failed to parse AI response into JSON: \" + error.message);\n}\n\n// 3. Transform the array into n8n compatible items\n// This ensures each object in your JSON becomes a separate row in the n8n table\nreturn parsedData.map(item => {\n  return {\n    json: {\n      source_id: item.source_id,\n      title: item.title,\n      type: item.type,\n      url: item.url,\n      score: item.score,\n      why_selected: item.why_selected,\n      // We join arrays into strings so they are easier to read in a table view\n      key_takeaways: Array.isArray(item.key_takeaways) ? item.key_takeaways.join('; ') : item.key_takeaways,\n      keywords: Array.isArray(item.keywords) ? item.keywords.join(', ') : item.keywords\n    }\n  };\n});"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -2752,
+        352
+      ],
+      "id": "6233d0f8-b237-4f35-bc76-6a40c2996f90",
+      "name": "Rapihin EP Youtube"
+    },
+    {
+      "parameters": {
+        "jsCode": "// 1. Get the specific array from the Aggregate node\n// We use the path you provided: $input.first().json.data\nconst inputs = $input.first().json.data || [];\nconst results = [];\n\n// 2. Loop through each item in that \"data\" array\nfor (const item of inputs) {\n  const rawText = item.text;\n\n  // Skip if valid text is missing\n  if (!rawText || typeof rawText !== \"string\") {\n    continue;\n  }\n\n  // 3. Clean Markdown fences\n  const cleanedText = rawText\n    .trim()\n    .replace(/^```json\\s*/i, \"\")\n    .replace(/^```\\s*/i, \"\")\n    .replace(/```$/i, \"\")\n    .trim();\n\n  // 4. Parse JSON\n  let parsed;\n  try {\n    parsed = JSON.parse(cleanedText);\n    // Handle double-encoded JSON if necessary\n    if (typeof parsed === \"string\") parsed = JSON.parse(parsed);\n  } catch (e) {\n    // Optional: Return an error object if you want to see which one failed\n    results.push({\n        json: { error: \"Failed to parse JSON\", raw: cleanedText.slice(0, 100) }\n    });\n    continue;\n  }\n\n  // 5. Normalize (Ensure we have an array to loop over)\n  const dataArray = Array.isArray(parsed) ? parsed : [parsed];\n\n  // 6. Map to clean output structure\n  dataArray.forEach((obj) => {\n    results.push({\n      json: {\n        source_id: obj?.source_id ?? \"\",\n        title: obj?.title ?? \"\",\n        type: obj?.type ?? \"website\",\n        url: obj?.url ?? \"\",\n        score: obj?.score ?? \"\",\n        why_selected: obj?.why_selected ?? \"\",\n        \n        // Join arrays into strings for easier reading in Google Sheets/Docs\n        key_takeaways: Array.isArray(obj?.key_takeaways) \n          ? obj.key_takeaways.join(\"; \") \n          : (obj?.key_takeaways ?? \"\"),\n          \n        claims: Array.isArray(obj?.claims) \n          ? obj.claims.join(\"; \") \n          : (obj?.claims ?? \"\"),\n          \n        data_points: Array.isArray(obj?.data_points) \n          ? obj.data_points.join(\"; \") \n          : (obj?.data_points ?? \"\"),\n          \n        steps: Array.isArray(obj?.steps) \n          ? obj.steps.join(\"; \") \n          : (obj?.steps ?? \"\"),\n          \n        keywords: Array.isArray(obj?.keywords) \n          ? obj.keywords.join(\", \") \n          : (obj?.keywords ?? \"\")\n      }\n    });\n  });\n}\n\n// 7. Return the clean, flat list of items\nreturn results;"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -5008,
+        704
+      ],
+      "id": "0a86951b-4008-4a80-85ff-da188dd5b6e3",
+      "name": "Rapihin EP Web"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "39a4ab82-eef4-4a53-9a6b-6e7327de08e4",
+              "name": "videoId",
+              "value": "={{ $json.videoId }}",
+              "type": "string"
+            },
+            {
+              "id": "a1ae6cde-5ab8-4038-bdc6-18ffbe59dcb8",
+              "name": "transcript_text",
+              "value": "={{ $json.transcript_text }}",
+              "type": "string"
+            },
+            {
+              "id": "da48ddf4-72d4-49e8-91ad-ca125c6cd278",
+              "name": "transcript_ok",
+              "value": "={{ $json.transcript_ok }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        -3424,
+        32
+      ],
+      "id": "4f7bee8d-4819-4259-a1af-beacc6581869",
+      "name": "Edit Fields"
+    },
+    {
+      "parameters": {
+        "mode": "combine",
+        "fieldsToMatchString": "url",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        -4864,
+        864
+      ],
+      "id": "4d63548a-8cdd-47f7-92d8-bdf4c674c815",
+      "name": "Final Merge"
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "documentURL": "={{$items(\"Create a document\")[0].json.id}}",
+        "actionsUi": {
+          "actionFields": [
+            {
+              "action": "insert",
+              "text": "={{ $json.doc_text }}"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.googleDocs",
+      "typeVersion": 2,
+      "position": [
+        -2192,
+        400
+      ],
+      "id": "b78e2768-5539-4932-8058-b0dfe7d3d1e0",
+      "name": "Final Document1",
+      "credentials": {
+        "googleDocsOAuth2Api": {
+          "id": "kXIFBJJjWXO31AXF",
+          "name": "Childgamings"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "folderId": "default",
+        "title": "={{ $json.body.topic }}"
+      },
+      "type": "n8n-nodes-base.googleDocs",
+      "typeVersion": 2,
+      "position": [
+        -4512,
+        672
+      ],
+      "id": "3179b5a1-c458-4525-884c-b9e326a6958f",
+      "name": "Create a document",
+      "credentials": {
+        "googleDocsOAuth2Api": {
+          "id": "kXIFBJJjWXO31AXF",
+          "name": "Childgamings"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "let out = \"\";\n\nitems.forEach((item) => {\n  const j = item.json;\n\n  out +=\n`\n\nURL : ${j.url ?? \"\"}\nTittle : ${j.title ?? \"\"}\nScore: ${j.score ?? \"\"}\n\nWhy Selected: ${j.why_selected ?? \"\"}\nKey Takeaway: ${j.key_takeaways ?? \"\"}\nPotential Keyword: ${j.keywords ?? \"\"}\n\n-----------------------------\n`;\n});\n\nreturn [{ json: { doc_text: out } }];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -2528,
+        400
+      ],
+      "id": "7308475b-c57a-4ede-832d-05f2e2246bcf",
+      "name": "Final Merge "
+    },
+    {
+      "parameters": {
+        "jsCode": "let out = \"\";\n\nitems.forEach((item) => {\n  const j = item.json;\n\n  out +=\n`\nSearch term: ${j.search_term ?? \"\"}\nBucket: ${j.bucket ?? \"\"}\nURL : ${j.url ?? \"\"}\nTittle : ${j.title ?? \"\"}\nScore: ${j.score ?? \"\"}\n\nWhy Selected: ${j.why_selected ?? \"\"}\nKey Takeaway: ${j.key_takeaways ?? \"\"}\nPotential Keyword: ${j.keywords ?? \"\"}\n\n-----------------------------\n`;\n});\n\nreturn [{ json: { doc_text: out } }];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -4480,
+        864
+      ],
+      "id": "66704856-3d3e-4a8b-94f4-470f2dae5726",
+      "name": "Web Merge"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "1d064737-e1d2-4bec-bebc-91cdc3e96c03",
+              "name": "title",
+              "value": "={{ $json.title }}",
+              "type": "string"
+            },
+            {
+              "id": "896a7bdf-a1b8-4307-bea4-293e311627ac",
+              "name": "type",
+              "value": "={{ $json.type }}",
+              "type": "string"
+            },
+            {
+              "id": "a02f0d8f-2cfc-4538-9738-22ad1311647c",
+              "name": "url",
+              "value": "={{ $json.url }}",
+              "type": "string"
+            },
+            {
+              "id": "506ed0d5-6188-446e-bf4b-02e553324da4",
+              "name": "score",
+              "value": "={{ $json.score }}",
+              "type": "number"
+            },
+            {
+              "id": "d9d65343-6d47-4c8a-aa0f-f9b085bb4d61",
+              "name": "why_selected",
+              "value": "={{ $json.why_selected }}",
+              "type": "string"
+            },
+            {
+              "id": "efcd14cc-af36-46e8-8316-9cce0bfb5595",
+              "name": "key_takeaways",
+              "value": "={{ $json.key_takeaways }}",
+              "type": "string"
+            },
+            {
+              "id": "2911368c-9a7e-4bdc-8da0-e5c39c4c3d6f",
+              "name": "keywords",
+              "value": "={{ $json.keywords }}",
+              "type": "string"
+            },
+            {
+              "id": "876db32b-7f7a-4f93-9256-79a14b4f97eb",
+              "name": "search_term",
+              "value": "={{ $json.search_term }}",
+              "type": "string"
+            },
+            {
+              "id": "2644ac4c-aa79-40aa-b57e-9b17e95b5958",
+              "name": "bucket",
+              "value": "={{ $json.bucket }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        -4688,
+        864
+      ],
+      "id": "8dba53b3-8c00-4123-bbc1-123804f93306",
+      "name": "Last Set"
+    },
+    {
+      "parameters": {
+        "batchSize": 2,
+        "options": {}
+      },
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [
+        -3808,
+        832
+      ],
+      "id": "3eaa6b1e-0289-4aa9-a4f5-788df8b4d5dd",
+      "name": "Loop Over Items2"
+    },
+    {
+      "parameters": {
+        "amount": 1
+      },
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        -1984,
+        48
+      ],
+      "id": "29e34c01-db87-4292-9cdb-6a11484de28c",
+      "name": "Wait",
+      "webhookId": "418520f4-be75-42d4-8e30-faa2cd42cf82"
+    },
+    {
+      "parameters": {
+        "amount": 1
+      },
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        -2672,
+        1072
+      ],
+      "id": "bbaeee68-24bc-409c-817d-1a10ebb4050f",
+      "name": "Wait1",
+      "webhookId": "72e735c2-35e8-45bc-8819-c558880066f3"
+    },
+    {
+      "parameters": {
+        "aggregate": "aggregateAllItemData",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.aggregate",
+      "typeVersion": 1,
+      "position": [
+        -3440,
+        992
+      ],
+      "id": "b76cb32f-1cd8-4cfd-814b-31d6da0686db",
+      "name": "Aggregate1"
+    },
+    {
+      "parameters": {
+        "aggregate": "aggregateAllItemData",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.aggregate",
+      "typeVersion": 1,
+      "position": [
+        -4736,
+        1168
+      ],
+      "id": "9859a131-51b9-4d65-a499-ba1ba22f0d66",
+      "name": "Aggregate2"
+    },
+    {
+      "parameters": {
+        "url": "http://host.docker.internal:8765/transcript",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "video_id",
+              "value": "={{ $json.videoId }}"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "text",
+              "outputPropertyName": "stdout"
+            }
+          },
+          "timeout": 180000
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        -3920,
+        176
+      ],
+      "id": "d2ed6997-c92b-4feb-87b2-5ab0f94f0eba",
+      "name": "Transcript Python"
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=You are a Research Architect optimizing for: (1) immediate understanding, (2) gap-driven retrieval, (3) minimal redundancy.\nUser Input Topic: \"{{ $json.name }}\"\n\nSTEP 0 — QUICK BRIEF (Internal Knowledge)\nWrite a compact “most-of-the-knowledge” brief in 8–12 bullet points total.\nConstraints:\n- No filler. Each bullet must add new information.\n- If you have LOW confidence or the topic is brand new (breaking news), state \"Insufficient internal knowledge\" in the brief.\n\n\n\nInclude, in order:\n- Definition (1–2 bullets)\n- Key concepts / components (2–3 bullets)\n- How it works / mechanism (2–3 bullets)\n- Applications / where used (1–2 bullets)\n- Pitfalls / misconceptions (1–2 bullets)\n\nThen produce OPEN_QUESTIONS:\n- 2–5 bullets: What is specific, implementation-dependent, or best validated by external sources?\n- If the topic is ambiguous (e.g. \"Transformer\" could be electrical or ML), include 1 disambiguation question.\n\nSTEP 1 — CLASSIFY\nClassify the topic into exactly ONE category:\n- ENGINEERING (Hardware, Circuits, Physics)\n- CODING (Software, ML, Algorithms)\n- MATH (Statistics, Calculus, Proofs)\n- FINANCE (Economics, Markets)\n- GENERAL (History, News)\n\nSTEP 2 — GENERATE 5 NON-OVERLAPPING RETRIEVAL QUERIES\nGenerate exactly 5 search queries.\nCore rule: Each query MUST represent a different retrieval intent (Theory, Practice, Context, Decision, Failure).\n\nQuery Rules:\n- Keep each query ≤ 12 words.\n- Use explicit operators if useful: filetype:pdf, site:.edu, site:github.com.\n- Do NOT use generic terms like \"overview\" or \"introduction\".\n- If the category is CODING or FINANCE, prioritize \"implementation\" and \"data\" over definitions.\n\nIntent Templates (Choose 5 distinct based on Category):\n- ENGINEERING: 1. Theory (pdf/.edu), 2. Solved Problems, 3. Datasheets/App Notes, 4. Topology Comparisons, 5. Failure Modes.\n- CODING: 1. Docs/Papers, 2. \"From Scratch\" Code, 3. System Design/Engineering Blogs, 4. Benchmarks, 5. Anti-patterns.\n- MATH: 1. Proofs/Theorems, 2. Solved Practice, 3. Real-world Applications, 4. Visual Intuition, 5. Common Fallacies.\n- FINANCE: 1. Definition/Formula, 2. Excel Models, 3. Case Studies, 4. Risk/Drawdowns, 5. Data Sources.\n- GENERAL: 1. Overview, 2. Timeline, 3. Recent News, 4. Critical Analysis, 5. Myths.\n\nSTEP 3 — OUTPUT (STRICT JSON)\nReturn ONLY a valid JSON object. Escape any double quotes inside the text strings.\nStructure:\n{\n  \"brief\": [ \"bullet 1\", \"bullet 2\" ],\n  \"open_questions\": [ \"question 1\", \"question 2\" ],\n  \"category\": \"DETECTED_CATEGORY\",\n  \"queries\": [ \"query 1\", \"query 2\", \"query 3\", \"query 4\", \"query 5\" ]\n}",
+        "batching": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.9,
+      "position": [
+        -4256,
+        416
+      ],
+      "id": "773a0a8e-a266-447d-a9dc-15137ac273c6",
+      "name": "Website Query1"
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=You are generating YouTube search queries optimized for depth, correctness, and low clickbait.\n\nTopic: \"{{ $json.name}}\"\n\nRules:\n\nGenerate 5 YouTube search queries.\n\nEach query must target a DIFFERENT video format or intent.\n\nAvoid beginner, hype, or clickbait phrasing.\n\nPrefer academic, practitioner, or long-form content.\n\nKeep queries short and natural (≤ 8 words if possible).\n\nInclude the topic terms in every query.\n\nDo NOT include site:youtube.com or operators.\n\nVideo intent types to cover (use each once):\n\n\n\nUniversity lecture / academic course\n\nPractitioner deep dive / case study\n\nVisual intuition / animation\n\nFailure modes / mistakes / pitfalls\n\nLong-form talk / seminar (≥30 min)\n\nOutput ONLY valid JSON:\n\n\n\n{\n\n\n\n\"youtube_queries\": [\n\n\n\n\"query 1\",\n\n\n\n\"query 2\",\n\n\n\n\"query 3\",\n\n\n\n\"query 4\",\n\n\n\n\"query 5\"\n\n\n\n]\n\n\n\n}",
+        "batching": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.9,
+      "position": [
+        -4272,
+        -320
+      ],
+      "id": "6dc228a3-a2c1-4104-9669-2da79d03f68b",
+      "name": "Youtube Query1"
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=Task: Extract and structure metadata from a list of GitHub repositories/websites.\n\nInput Data: {{ JSON.stringify($json.data) }}\n\nInstructions:\n\nAnalyze: Review each URL provided in the input data.\n\nExtract: Identify the URL, the Page Title (or Repository Name), and a Brief Description of the content/purpose of the site.\n\nRefine: Ensure the \"content\" field is a concise summary (1-2 sentences), not a raw data dump.\n\nFormat: Output the results strictly in JSON format. Do not include conversational text, explanations, or markdown code blocks outside of the JSON array.\n\nOutput Schema: Return an array of objects following this exact structure:\n\nJSON\n[\n  {\n    \"website\": \"URL goes here\",\n    \"title\": \"Page or Repository Title goes here\",\n    \"content\": \"A brief, clear description of the website content goes here, including the details so it's a clear content\"\n  }\n]",
+        "batching": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.9,
+      "position": [
+        -1728,
+        432
+      ],
+      "id": "5c78cc06-eb5e-4566-b8a3-09c18fe396ce",
+      "name": "Github Repo Extractor1"
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=TASK:\nCreate an EXTRACT PACK for EACH of the provided YouTube videos.\nUse ONLY the provided information.\n\nINPUT DATA (List of 8 videos):\n{{ JSON.stringify ($json.data) }}\n\nRULES:\n- Return a JSON array of objects.\n- Each object must follow the OUTPUT FORMAT below.\n- Max 5 bullet points per section.\n\nOUTPUT FORMAT:\n[\n  {\n    \"source_id\": \"...\",\n    \"type\": \"youtube\",\n    \"title\": \"...\",\n    \"url\": \"...\",\n    \"channel\": \"...\",\n    \"score\": 0,\n    \"why_selected\": \"...\",\n    \"key_takeaways\": [],\n    \"claims\": [],\n    \"steps\": [],\n    \"keywords\": []\n  },\n  ...\n]",
+        "messages": {
+          "messageValues": []
+        },
+        "batching": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.9,
+      "position": [
+        -2336,
+        48
+      ],
+      "id": "a63e978a-738c-41b7-b7c1-174192204d21",
+      "name": "EP Youtube"
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=You are a research assistant. TASK: Create an EXTRACT PACK from a web article. Use ONLY the provided content. Do NOT hallucinate. RULES: - Max 6 bullets total per section - Focus on factual content - If data or numbers exist, capture them Input: {{ JSON.stringify($json.data) }} OUTPUT: Return ONLY valid JSON. OUTPUT FORMAT: { \"source_id\": \"\", \"type\": \"website\", \"title\": \"\", \"url\": \"\", \"score\": \"\", \"why_selected\": \"\", \"key_takeaways\": [], \"claims\": [], \"data_points\": [], \"steps\": [], \"keywords\": [] } this is the prompt",
+        "batching": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.9,
+      "position": [
+        -3024,
+        1056
+      ],
+      "id": "e075b5a8-c306-4b8d-a4ca-a3c9c5383d31",
+      "name": "EP Website"
+    },
+    {
+      "parameters": {
+        "model": "openai/gpt-oss-120b",
+        "options": {
+          "maxTokensToSample": 30000,
+          "temperature": 0.2
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatGroq",
+      "typeVersion": 1,
+      "position": [
+        -3264,
+        656
+      ],
+      "id": "127bbe43-4865-496c-9030-7d816d4241f2",
+      "name": "GPT OSS 120B",
+      "credentials": {
+        "groqApi": {
+          "id": "cofZt1S4JowjXxRT",
+          "name": "Groq account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "model": "openai/gpt-oss-120b",
+        "options": {
+          "maxTokensToSample": 30000,
+          "temperature": 0.2
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatGroq",
+      "typeVersion": 1,
+      "position": [
+        -4144,
+        576
+      ],
+      "id": "c19179b8-3df5-4a39-a1f3-2a67b98d56eb",
+      "name": "GPT OSS 120B1",
+      "credentials": {
+        "groqApi": {
+          "id": "cofZt1S4JowjXxRT",
+          "name": "Groq account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "model": "openai/gpt-oss-120b",
+        "options": {
+          "temperature": 0.2
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatGroq",
+      "typeVersion": 1,
+      "position": [
+        -4192,
+        -160
+      ],
+      "id": "eb3d0926-537a-48dd-8eab-abd860e01f53",
+      "name": "GPT OSS 120B2",
+      "credentials": {
+        "groqApi": {
+          "id": "cofZt1S4JowjXxRT",
+          "name": "Groq account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "model": "openai/gpt-oss-120b",
+        "options": {
+          "maxTokensToSample": 16000,
+          "temperature": 0.2
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatGroq",
+      "typeVersion": 1,
+      "position": [
+        -2736,
+        -80
+      ],
+      "id": "7e7fd680-3082-4327-b1fb-585640555502",
+      "name": "GPT OSS 120B3",
+      "credentials": {
+        "groqApi": {
+          "id": "cofZt1S4JowjXxRT",
+          "name": "Groq account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=You are a Video Content Curator.\n\nI will provide a JSON array of YouTube candidates across multiple search terms.\nEach candidate includes:\nvideo_id, title, channel, description, duration (ISO 8601), publishedAt, viewCount, likeCount, search_term.\n\nINPUT:\n{{ JSON.stringify(\n  ($json.title || []).map((t, i) => ({\n    video_id: ($json.id || [])[i] ?? null,\n    title: t ?? \"\",\n    description: ($json.description || [])[i] ?? \"\",\n    channel: ($json.channel || [])[i] ?? \"\",\n    duration: ($json.duration || [])[i] ?? null,\n    publishedAt: ($json.publishedAt || [])[i] ?? null,\n    viewCount: ($json.viewCount || [])[i] ?? null,\n    likeCount: ($json.likeCount || [])[i] ?? null,\n    search_term: ($json.search_term || [])[i] ?? \"\"\n  })),\n  null,\n  2\n) }}\n\nTASK:\nFor EACH distinct search_term, rate candidates that belong to that search_term and produce up to SIX (6) rated videos.\nPrefer technical depth, serious tutorials/lectures, and practical implementation.\nAvoid reaction/clickbait/shallow news.\n\nSCORING RUBRIC (0-100):\n- 90-100: Lecture / conference / official docs-style deep dive, strong channel authority.\n- 70-89: Solid tutorial / walkthrough with substance.\n- 40-69: News/overview; some value but limited depth.\n- 0-39: Low value / clickbait / reactions.\n\nOUTPUT (STRICT JSON ONLY):\n{\n  \"results_by_topic\": [\n    {\n      \"topic_query\": \"the search_term\",\n      \"rated_videos\": [\n        {\n          \"video_id\": \"original video id\",\n          \"title\": \"...\",\n          \"channel\": \"...\",\n          \"score\": 0,\n          \"tag\": \"Lecture|Tutorial|News|LowValue\",\n          \"reason\": \"1 sentence\"\n        }\n      ]\n    }\n  ]\n}",
+        "batching": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.9,
+      "position": [
+        -2736,
+        -240
+      ],
+      "id": "7405ed90-83ad-4f1f-9a8d-f3488c3a5b3e",
+      "name": "Reranker YOutube"
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=Role: You are a Senior Research Librarian specializing in technical content curation.\n\nI will provide a JSON array of web candidates. Each candidate has:\n- title, url, content (snippet), search_term (the query that found it),\n- domain, score_det (a deterministic pre-score), and score_features.\n\nINPUT:\n{{ JSON.stringify($json.candidates, null, 2) }}\n\nTASK:\nFor EACH distinct search_term, produce a RANKED list of up to SIX (6) sources from the candidates where candidate.search_term matches that search_term.\n\nScoring:\n- quality_score (0-100): technical authority + depth + usefulness\n- confidence (0.0-1.0): your certainty in accuracy/seriousness\n- weighted_score = quality_score * confidence\n\nBucket (choose exactly one):\nTHEORY, IMPLEMENTATION, CASE_STUDY, COMPARISON, PITFALLS, NEWS, LOW_VALUE\n\nRules:\n- Prefer credible/authoritative sources (standards, docs, reputable engineering blogs, papers).\n- Avoid SEO spam, thin affiliate pages, and purely promotional content.\n- Prefer sources that likely contain substantive text (not just nav pages).\n- Try to avoid reusing the exact same URL across different search_term groups unless it is uniquely essential.\n\nOUTPUT (STRICT JSON ONLY):\n{\n  \"results_by_topic\": [\n    {\n      \"topic_query\": \"the search_term\",\n      \"ranked_sources\": [\n        {\n          \"url\": \"source url\",\n          \"title\": \"title\",\n          \"bucket\": \"CLASSIFICATION\",\n          \"quality_score\": 0,\n          \"confidence\": 0.0,\n          \"weighted_score\": 0.0,\n          \"reason\": \"1 sentence\"\n        }\n      ]\n    }\n  ]\n}",
+        "batching": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.9,
+      "position": [
+        -3264,
+        544
+      ],
+      "id": "9006cd47-92fa-42ea-a2ce-dc4b68c217d0",
+      "name": "Reranker Website"
+    },
+    {
+      "parameters": {
+        "model": "openai/gpt-oss-120b",
+        "options": {
+          "maxTokensToSample": 30000,
+          "temperature": 0.2
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatGroq",
+      "typeVersion": 1,
+      "position": [
+        -1632,
+        560
+      ],
+      "id": "d6161f92-231c-4f5b-b8f2-f6ced265d78c",
+      "name": "GPT OSS 120B 3",
+      "credentials": {
+        "groqApi": {
+          "id": "cofZt1S4JowjXxRT",
+          "name": "Groq account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "model": "openai/gpt-oss-120b",
+        "options": {
+          "maxTokensToSample": 30000,
+          "temperature": 0.2
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatGroq",
+      "typeVersion": 1,
+      "position": [
+        -2336,
+        288
+      ],
+      "id": "13689841-1c68-4bbd-bbfd-c8f4ba383ff3",
+      "name": "GPT OSS 120B 4",
+      "credentials": {
+        "groqApi": {
+          "id": "cofZt1S4JowjXxRT",
+          "name": "Groq account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "model": "openai/gpt-oss-120b",
+        "options": {
+          "maxTokensToSample": 30000,
+          "temperature": 0.2
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatGroq",
+      "typeVersion": 1,
+      "position": [
+        -2464,
+        1248
+      ],
+      "id": "34ef85ac-c5a0-4ac8-ae19-3fad539ef5c8",
+      "name": "GPT OSS 120B 5",
+      "credentials": {
+        "groqApi": {
+          "id": "cofZt1S4JowjXxRT",
+          "name": "Groq account"
+        }
+      }
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Tavily Search": {
+      "main": [
+        [
+          {
+            "node": "Aggregator (Remove Dupes) ",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Create a document",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Query Splitter": {
+      "main": [
+        [
+          {
+            "node": "Tavily Search",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Youtube Filter": {
+      "main": [
+        [
+          {
+            "node": "Search TERM",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Youtube GET": {
+      "main": [
+        [
+          {
+            "node": "Youtube Filter",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Top K retrieval web": {
+      "main": [
+        [
+          {
+            "node": "Sort",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Merge2",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Merge3",
+            "type": "main",
+            "index": 1
+          },
+          {
+            "node": "Final Merge",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Top K retrieval yt": {
+      "main": [
+        [
+          {
+            "node": "Video ID Retriever",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get many videos": {
+      "main": [
+        [
+          {
+            "node": "Youtube GET",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Aggregate": {
+      "main": [
+        [
+          {
+            "node": "Reranker YOutube",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Youtube Splitter": {
+      "main": [
+        [
+          {
+            "node": "Get many videos",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Search TERM": {
+      "main": [
+        [
+          {
+            "node": "Aggregate",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Video ID Retriever": {
+      "main": [
+        [
+          {
+            "node": "Loop Over Items",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Merge All Input",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Cleaner + Parser": {
+      "main": [
+        [
+          {
+            "node": "Edit Fields",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Loop Over Items": {
+      "main": [
+        [
+          {
+            "node": "Filter",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Transcript Python",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Filter": {
+      "main": [
+        [
+          {
+            "node": "Cleaner + Parser",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge All Input": {
+      "main": [
+        [
+          {
+            "node": "Aggregate Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Aggregate Data": {
+      "main": [
+        [
+          {
+            "node": "Loop Over Items1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Loop Over Items1": {
+      "main": [
+        [
+          {
+            "node": "Rapihin EP Youtube",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "EP Youtube",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Aggregator (Remove Dupes) ": {
+      "main": [
+        [
+          {
+            "node": "Reranker Website",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Sort": {
+      "main": [
+        [
+          {
+            "node": "If",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract Text": {
+      "main": [
+        [
+          {
+            "node": "Clean Content",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge1": {
+      "main": [
+        [
+          {
+            "node": "Loop Over Items2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If": {
+      "main": [
+        [
+          {
+            "node": "Url Filter",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Extract Text",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Clean Content": {
+      "main": [
+        [
+          {
+            "node": "Merge2",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Content Cleaner": {
+      "main": [
+        [
+          {
+            "node": "Rapihin Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Url Filter": {
+      "main": [
+        [
+          {
+            "node": "Combine Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Combine Data": {
+      "main": [
+        [
+          {
+            "node": "Github Repo Extractor1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge2": {
+      "main": [
+        [
+          {
+            "node": "Set the last data to merge",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Set the last data to merge": {
+      "main": [
+        [
+          {
+            "node": "Merge1",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Merge3": {
+      "main": [
+        [
+          {
+            "node": "Set the last data to merge1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Rapihin Data": {
+      "main": [
+        [
+          {
+            "node": "Merge3",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Set the last data to merge1": {
+      "main": [
+        [
+          {
+            "node": "Merge1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Formatter": {
+      "main": [
+        [
+          {
+            "node": "Loop Over Items",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Rapihin EP Youtube": {
+      "main": [
+        [
+          {
+            "node": "Final Merge ",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Rapihin EP Web": {
+      "main": [
+        [
+          {
+            "node": "Final Merge",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Edit Fields": {
+      "main": [
+        [
+          {
+            "node": "Merge All Input",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Final Merge": {
+      "main": [
+        [
+          {
+            "node": "Last Set",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create a document": {
+      "main": [
+        [
+          {
+            "node": "Youtube Query1",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Website Query1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Final Merge ": {
+      "main": [
+        [
+          {
+            "node": "Final Document1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Web Merge": {
+      "main": [
+        [
+          {
+            "node": "Final Document",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Last Set": {
+      "main": [
+        [
+          {
+            "node": "Web Merge",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Loop Over Items2": {
+      "main": [
+        [
+          {
+            "node": "Aggregate2",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Aggregate1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait": {
+      "main": [
+        [
+          {
+            "node": "Loop Over Items1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait1": {
+      "main": [
+        [
+          {
+            "node": "Loop Over Items2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Aggregate1": {
+      "main": [
+        [
+          {
+            "node": "EP Website",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Aggregate2": {
+      "main": [
+        [
+          {
+            "node": "Rapihin EP Web",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Transcript Python": {
+      "main": [
+        [
+          {
+            "node": "Formatter",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Website Query1": {
+      "main": [
+        [
+          {
+            "node": "Query Splitter",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Youtube Query1": {
+      "main": [
+        [
+          {
+            "node": "Youtube Splitter",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Github Repo Extractor1": {
+      "main": [
+        [
+          {
+            "node": "Content Cleaner",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "EP Youtube": {
+      "main": [
+        [
+          {
+            "node": "Wait",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "EP Website": {
+      "main": [
+        [
+          {
+            "node": "Wait1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "GPT OSS 120B": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Reranker Website",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "GPT OSS 120B1": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Website Query1",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "GPT OSS 120B2": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Youtube Query1",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "GPT OSS 120B3": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Reranker YOutube",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Reranker YOutube": {
+      "main": [
+        [
+          {
+            "node": "Top K retrieval yt",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Reranker Website": {
+      "main": [
+        [
+          {
+            "node": "Top K retrieval web",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "GPT OSS 120B 3": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Github Repo Extractor1",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "GPT OSS 120B 4": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "EP Youtube",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "GPT OSS 120B 5": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "EP Website",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "versionId": "88cd3e30-a9af-451b-b513-3462389ac04c",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "5acab04fbb2a2e0b340653cd6533b24172f388144103ca1bedaacc8e9c6c17db"
+  },
+  "nodeGroups": [],
+  "id": "MJ4q5CbOXfHEDkcd",
+  "tags": []
+}

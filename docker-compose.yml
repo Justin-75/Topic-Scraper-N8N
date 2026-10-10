@@ -1,0 +1,37 @@
+# n8n plus the transcript bridge.
+#
+#   docker compose up -d --build     start both (n8n at http://localhost:5678)
+#   docker compose logs -f           watch them
+#   docker compose down              stop them (your n8n data stays in the n8n_data volume)
+#
+# No API keys belong in this file: they are entered in the n8n editor and stored in n8n_data.
+
+services:
+  n8n:
+    image: ${N8N_IMAGE:-docker.n8n.io/n8nio/n8n}
+    restart: unless-stopped
+    ports:
+      # Only this computer can open the editor. Use "5678:5678" to allow other devices.
+      - "127.0.0.1:5678:5678"
+    volumes:
+      - n8n_data:/home/node/.n8n
+
+  transcript:
+    build:
+      context: .
+      args:
+        PYTHON_IMAGE: ${PYTHON_IMAGE:-python:3.12-slim}
+        PIP_INDEX_URL: ${PIP_INDEX_URL:-https://pypi.org/simple}
+    restart: unless-stopped
+    networks:
+      default:
+        aliases:
+          # The workflow's "Transcript Python" node calls http://host.docker.internal:8765.
+          # Inside this network that name points at this container, so the same workflow
+          # file works whether the bridge runs here or as a plain Python script on the host.
+          - host.docker.internal
+
+volumes:
+  n8n_data:
+    # Fixed name (the one n8n's own docs use) so an existing n8n volume is picked up as is.
+    name: n8n_data

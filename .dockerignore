@@ -1,0 +1,8 @@
+# The image only needs requirements.txt and the two Python scripts.
+.git
+.env
+cookies.txt
+__pycache__/
+*.png
+*.json
+*.md

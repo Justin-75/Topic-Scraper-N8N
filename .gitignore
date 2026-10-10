@@ -1,0 +1,8 @@
+# Never commit browser cookies or local secrets
+cookies.txt
+.env
+
+__pycache__/
+*.pyc
+tempCodeRunnerFile.py
+.claude/
