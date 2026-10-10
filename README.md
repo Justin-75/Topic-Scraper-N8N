@@ -1,19 +1,17 @@
 # Topic Scraper
 
-An [n8n](https://n8n.io) workflow that turns a study topic into a research brief. You send it a topic; it searches YouTube and the web, filters and ranks what it finds, reads the best sources (full video transcripts and full page text), and writes a summary of each one into a new Google Doc.
+An [n8n](https://n8n.io) workflow that turns a study topic into a research brief. You send it a topic; it searches YouTube and the web, filters and ranks what it finds, reads the best sources (full video transcripts and full page text), and writes a summary of each one into a new Google Doc. You can use RAG like NotebookLLM for supporting your further studies. 
 
 ![The workflow on the n8n canvas](N8N%20.png)
 
 ## Example output
-
-Two documents the workflow produced, unedited:
 
 | Topic sent | Result |
 |---|---|
 | Transformer Architecture fine tuning | [Google Doc](https://docs.google.com/document/d/1tBiWvBboDd1dzI4dlnmaBDgQtd6NRzn8VPjw97e2kcw/edit?usp=sharing) (8 videos, 12 web pages) |
 | How to implement AdaBoost from scratch | [Google Doc](https://docs.google.com/document/d/1L02Z-YFH6cUe6tWe3gBLbQsDRZFFyAK6gRG7ggeMGZE/edit?usp=sharing) (7 videos, 10 web pages) |
 
-One entry looks like this (shortened):
+Every searched topic after the filters looks like this (shortened):
 
 ```text
 Search term: github.com transformer fine tuning example python pytorch
@@ -42,8 +40,7 @@ Potential Keyword: Transformers, Hugging Face, pretrained models, NLP, PyTorch, 
 - **Extract packs.** For each source the model writes why it was selected, the key takeaways and keywords.
 - **Bounded request sizes.** Page text and transcripts are cut at 20,000 characters each.
 - **Runs with one Docker command,** or with a manual install.
-- **No API keys in this repository.** Every key is stored in n8n's own credential store.
-
+- 
 ## How it works
 
 ```mermaid
@@ -81,7 +78,7 @@ Every model step uses `openai/gpt-oss-120b` on Groq. Node names from the canvas 
 | **YouTube** | | | | |
 | 1 | Write queries | `Youtube Query1` | Model | 5 queries, one per intent |
 | 2 | Search | `Get many videos`, `Youtube GET` | YouTube API | 8 videos per query (40) with length, tags and view counts |
-| 3 | Hard filter | `Youtube Filter` | Rules | 15 minutes or longer, no banned keyword |
+| 3 | Hard filter | `Youtube Filter` | Rules | 15 minutes or longer, no clickbait words |
 | 4 | Score | `Reranker YOutube` | Model | Up to 6 scored videos per query |
 | 5 | Select | `Top K retrieval yt` | Rules | Top 3 per query, no video twice (up to 15) |
 | 6 | Transcript | `Transcript Python`, `Filter` | Python + rules | Only videos that have a transcript |
@@ -187,7 +184,7 @@ The prompt gives the model the bucket names only; the right-hand column is the p
 
 **6. Reading the pages.** The `If` node splits the selected sources by URL:
 
-- **Contains `github.com`:** the page is not downloaded. `Github Repo Extractor1` writes a one or two sentence description from the URL and title.
+- **Contains `github.com`:** (For some technology related stuff where Tavily can't access,  `Github Repo Extractor1` writes a one or two sentence description based on the content of the repository.
 - **Everything else:** `Extract Text` downloads the page text with Tavily Extract, and `Clean Content` cuts it at 20,000 characters.
 
 **7. Extract packs.** `EP Website` summarizes two pages per request and writes, per page: why it was selected, key takeaways, claims, data points, steps and keywords (at most 6 bullets each). The result is joined back to its bucket and search term by URL.
@@ -242,15 +239,12 @@ Accounts and keys:
 | [Tavily](https://app.tavily.com) | Web search and page text | An API key (starts with `tvly-`) |
 | [Google Cloud](https://console.cloud.google.com) | YouTube search, Google Docs | A project with the **YouTube Data API v3**, **Google Docs API** and **Google Drive API** enabled, and an OAuth client ID (type: Web application) |
 
+You can use local LLLM like Ollama or other LLM API that is supported by N8N, You only need to change raw text of some nodes after the LLM call
+
 ## Installation
 
-There are two ways to install. Pick one.
+There are two ways to install this repo:
 
-| | Option A: Docker | Option B: Manual |
-|---|---|---|
-| You install | Docker only | Python, the Python packages, and n8n |
-| Transcript bridge | Starts by itself in a container | You start `python transcript_server.py` |
-| Change to the workflow | None | None, or one URL (see step 4) |
 
 ### Option A: Docker
 
@@ -280,20 +274,6 @@ There are two ways to install. Pick one.
 
 5. Open <http://localhost:5678>. The first time, n8n asks you to create an owner account.
 
-Useful commands:
-
-| Command | Effect |
-|---|---|
-| `docker compose logs -f` | Watch both containers |
-| `docker compose down` | Stop and remove the containers. Your workflows and credentials stay in the `n8n_data` volume. |
-| `docker compose up -d --build` | Start again, rebuilding the bridge if a script changed |
-
-Notes:
-
-- If n8n is already running on port 5678 (for example an older `docker run` container), stop it first, or the new one cannot start.
-- The volume is named `n8n_data`, the name n8n's own instructions use. If you already have a volume with that name, your existing n8n data is used as it is.
-- If Docker Hub is slow or blocked on your network, copy `.env.example` to `.env` and remove the `#` from the mirror lines.
-- The bridge is not opened to your computer or network. Only the n8n container can reach it.
 
 ### Option B: Manual
 
@@ -315,12 +295,6 @@ Notes:
      n8n start
      ```
 
-   - Or as a single Docker container:
-
-     ```bash
-     docker run -d --name n8n -p 5678:5678 -v n8n_data:/home/node/.n8n docker.n8n.io/n8nio/n8n
-     ```
-
 3. Start the transcript bridge and leave its window open:
 
    ```bash
@@ -335,7 +309,6 @@ Notes:
    |---|---|
    | Installed with npm | Change it to `http://127.0.0.1:8765/transcript` |
    | Docker Desktop container (Windows, macOS) | Leave it: `http://host.docker.internal:8765/transcript` |
-   | Docker container on Linux | Use Option A instead. A container cannot reach a script that listens only on the computer's own `127.0.0.1`. |
 
 ## Set up the workflow in n8n
 
@@ -370,7 +343,7 @@ Do this once, for either option.
 
 ## Running it
 
-1. Make sure the transcript bridge is running (Option A: it already is; Option B: `python transcript_server.py`).
+1. Make sure the transcript bridge is running (Option A: it already is; Option B: you need to run `python transcript_server.py`).
 
 2. In the n8n editor, click **Execute workflow**. n8n now waits for one request.
 
@@ -400,29 +373,12 @@ Do this once, for either option.
 
 `/webhook-test/search` is n8n's test address: it answers once after each click of **Execute workflow**. To run without clicking, activate (publish) the workflow and use `http://localhost:5678/webhook/search` instead. In `trigger.py` that is the `WEBHOOK_URL` line.
 
-## Tuning
-
-| Setting | Where | Default |
-|---|---|---|
-| Minimum video length, banned keywords | `Youtube Filter` (`MIN_DURATION_MINUTES`, `BANNED_KEYWORDS`) | 15 minutes, 11 keywords |
-| Videos fetched per query | `Get many videos` (Limit) | 8 |
-| Web results fetched per query | `Tavily Search` (`max_results`) | 10 |
-| Web candidates sent to the ranker per query | `Aggregator (Remove Dupes)` (`PREFILTER_PER_QUERY`) | 12 |
-| Sources kept per query | `Top K retrieval yt` (`TOP_PER_SEARCH`), `Top K retrieval web` (`TOP_PER_QUERY`) | 3 |
-| Maximum characters kept per web page | `Clean Content` (`MAX_CHARS`) | 20,000 |
-| Maximum characters kept per transcript | `Cleaner + Parser` (`MAX_TRANSCRIPT_CHARS`) | 20,000 |
-| Web pages summarized per request | `Loop Over Items2` (Batch Size) | 2 |
-| Model | The seven Groq model nodes | `openai/gpt-oss-120b`, temperature 0.2 |
-| Maximum reply length | The Groq model nodes (Maximum Number of Tokens) | 30,000 (16,000 on `GPT OSS 120B3`, not set on `GPT OSS 120B2`) |
 
 ## Things to know
 
 - **Transcripts are slow on purpose.** `YoutubeTranscript.py` waits a random 15 to 40 seconds before each request so YouTube does not block your IP address. For 15 videos that is about 4 to 10 minutes. Do not remove the delay.
 - **Transcripts are English only.** Videos without English captions are skipped, not treated as errors.
-- **The Google Doc can hold fewer than 15 + 15 entries.** A video is dropped when its transcript cannot be fetched, the model does not always return a summary for every video it was given, and a web source is dropped when its summary cannot be matched back to it. In the "Transformer Architecture fine tuning" run, 15 videos were selected, 13 transcripts were fetched, and 8 video summaries were written. The two example documents ended with 8 + 12 and 7 + 10 entries.
-- **The Groq requests are large.** The single transcript request can reach about 75,000 tokens (15 transcripts of 20,000 characters), and each web summary request about 10,000. Your Groq account's tokens-per-minute limit for the model has to allow that, or Groq rejects the request; check the limits of your plan before the first run, because a free plan's limit may be too small. Lowering the two character limits in the table above makes the requests smaller.
+- **The Token consumption is quite large.** The single transcript request can reach about 75,000 tokens (15 transcripts of 20,000 characters), and each web summary request about 10,000. (~0.05 USD per topic)
 - **Keep "Maximum Number of Tokens" set on the Groq nodes.** Without it Groq stops the reply early, the JSON is cut off, and the next Code node fails.
 - **The model must answer in JSON.** Each ranking and summary step parses the model's reply as JSON. If a reply is malformed, the step either stops the run or drops that source. A few error messages in the Code nodes still say "Gemini" (for example "Failed to parse Gemini JSON"); they come from an earlier version of the workflow, and the model they refer to is the Groq one.
-- **YouTube and Google must be reachable** from the machine (or container) that runs n8n and the transcript bridge.
-- **Never commit real keys.** All keys live in n8n credentials, not in the workflow file. `.gitignore` already excludes `.env` and `cookies.txt`.
 - **Tested with** n8n 2.42.6 on Windows with Docker Desktop. Option B (n8n in a container, bridge started by hand) has done full runs. For Option A, the containers were started, the workflow was imported, and n8n fetched a real transcript through the bridge.
