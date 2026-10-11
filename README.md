@@ -1,46 +1,10 @@
 # Topic Scraper
 
-An [n8n](https://n8n.io) workflow that turns a study topic into a research brief. You send it a topic; it searches YouTube and the web, filters and ranks what it finds, reads the best sources (full video transcripts and full page text), and writes a summary of each one into a new Google Doc. You can use RAG like NotebookLLM for supporting your further studies. 
+An N8N workflow that turns a study topic into a research brief. You send it a topic; it searches YouTube and the web, filters and ranks what it finds, reads the best sources (full video transcripts and full page text), and writes a summary of each one into a new Google Doc. You can use RAG like NotebookLLM for supporting your further studies with a reliable sources. In the run shown in the screenshot above, the YouTube branch went 40 videos → 23 after the hard filter → 15 selected → 13 with a transcript, and the web branch selected 15 pages (3 GitHub, 12 others).
+
 
 ![The workflow on the n8n canvas](img/N8N%20.png)
 
-## Example output
-
-| Topic sent | Result |
-|---|---|
-| Transformer Architecture fine tuning | [Google Doc](https://docs.google.com/document/d/1tBiWvBboDd1dzI4dlnmaBDgQtd6NRzn8VPjw97e2kcw/edit?usp=sharing) (8 videos, 12 web pages) |
-| How to implement AdaBoost from scratch | [Google Doc](https://docs.google.com/document/d/1L02Z-YFH6cUe6tWe3gBLbQsDRZFFyAK6gRG7ggeMGZE/edit?usp=sharing) (7 videos, 10 web pages) |
-
-Every searched topic after the filters looks like this (shortened):
-
-```text
-Search term: github.com transformer fine tuning example python pytorch
-Bucket: THEORY
-URL : https://github.com/huggingface/transformers
-Tittle : GitHub - huggingface/transformers: 🤗 Transformers
-Score: 93.1
-
-Why Selected: Highest relevance score; official repository of the Hugging Face Transformers library ...
-Key Takeaway: Official Hugging Face Transformers library repository.; Provides thousands of pretrained models ...
-Potential Keyword: Transformers, Hugging Face, pretrained models, NLP, PyTorch, TensorFlow, JAX
-```
-
-## Features
-
-- **One request in, one Google Doc out.** A webhook receives `{"topic": "..."}`, creates a Google Doc named after the topic, and fills it in.
-- **Two research branches:** YouTube videos and web pages.
-- **Queries with different intents.** The model writes 5 YouTube queries and 5 web queries. Each query has its own purpose (lecture, case study, pitfalls, benchmarks, ...), so the results do not all say the same thing.
-- **Topic classification.** The topic is put into one of five categories (engineering, coding, math, finance, general), and the web queries follow the template for that category.
-- **Rule-based video filter.** Videos shorter than 15 minutes, or with clickbait words in the title or tags, are removed before any model sees them.
-- **Scored videos.** A model scores every remaining video from 0 to 100 against a fixed rubric and tags it as lecture, tutorial, news or low value.
-- **Real transcripts.** The top videos are summarized from their full transcript, not from the description.
-- **Web de-duplication and pre-scoring.** URLs are cleaned of tracking parameters, duplicates are removed, and every page gets a score from fixed rules (domain authority, keyword match, snippet length, paywall).
-- **Buckets.** A model sorts each web page into one of seven buckets (theory, implementation, case study, ...) and scores it.
-- **Top 3 per query, with variety.** The three best sources for each query are kept, preferring three different buckets and avoiding the same URL or video twice. That is up to 15 videos and 15 web pages per topic.
-- **Extract packs.** For each source the model writes why it was selected, the key takeaways and keywords.
-- **Bounded request sizes.** Page text and transcripts are cut at 20,000 characters each.
-- **Runs with one Docker command,** or with a manual install.
-- 
 ## How it works
 
 ```mermaid
@@ -69,32 +33,24 @@ flowchart LR
     WE --> DOC
 ```
 
-Every model step uses `openai/gpt-oss-120b` on Groq. Node names from the canvas are written `like this`.
 
-### The filter system at a glance
+## Features
 
-| # | Stage | Node | Done by | What it keeps |
-|---|---|---|---|---|
-| **YouTube** | | | | |
-| 1 | Write queries | `Youtube Query1` | Model | 5 queries, one per intent |
-| 2 | Search | `Get many videos`, `Youtube GET` | YouTube API | 8 videos per query (40) with length, tags and view counts |
-| 3 | Hard filter | `Youtube Filter` | Rules | 15 minutes or longer, no clickbait words |
-| 4 | Score | `Reranker YOutube` | Model | Up to 6 scored videos per query |
-| 5 | Select | `Top K retrieval yt` | Rules | Top 3 per query, no video twice (up to 15) |
-| 6 | Transcript | `Transcript Python`, `Filter` | Python + rules | Only videos that have a transcript |
-| 7 | Summarize | `EP Youtube` | Model | One extract pack per video |
-| **Web** | | | | |
-| 1 | Classify + write queries | `Website Query1` | Model | 1 category, 5 queries, one per intent |
-| 2 | Search | `Tavily Search` | Tavily API | 10 results per query (50) |
-| 3 | De-dupe + pre-score | `Aggregator (Remove Dupes)` | Rules | Unique URLs, best 12 per query |
-| 4 | Rank into buckets | `Reranker Website` | Model | Up to 6 ranked sources per query |
-| 5 | Select | `Top K retrieval web` | Rules | Top 3 per query, different buckets first (up to 15) |
-| 6 | Read | `If`, `Extract Text`, `Github Repo Extractor1` | Tavily API / model | Page text, cut at 20,000 characters |
-| 7 | Summarize | `EP Website` | Model | One extract pack per page |
+- **One request in, one Google Doc out.** A webhook receives `{"topic": "..."}`, creates a Google Doc named after the topic, and fills it in.
+- **Two research branches:** YouTube videos and web pages.
+- **Queries with different intents.** The model writes 5 YouTube queries and 5 web queries. Each query has its own purpose (lecture, case study, pitfalls, benchmarks, ...), so the results do not all say the same thing.
+- **Topic classification.** The topic is put into one of five categories (engineering, coding, math, finance, general), and the web queries follow the template for that category.
+- **Rule-based video filter.** Videos shorter than 15 minutes, or with clickbait words in the title or tags, are removed before any model sees them.
+- **Scored videos.** A model scores every remaining video from 0 to 100 against a fixed rubric and tags it as lecture, tutorial, news or low value.
+- **Real transcripts.** The top videos are summarized from their full transcript, not from the description.
+- **Web de-duplication and pre-scoring.** URLs are cleaned of tracking parameters, duplicates are removed, and every page gets a score from fixed rules (domain authority, keyword match, snippet length, paywall).
+- **Buckets.** A model sorts each web page into one of seven buckets (theory, implementation, case study, ...) and scores it.
+- **Top 3 per query, with variety.** The three best sources for each query are kept, preferring three different buckets and avoiding the same URL or video twice. That is up to 15 videos and 15 web pages per topic.
+- **Extract packs.** For each source the model writes why it was selected, the key takeaways and keywords.
+- **Bounded request sizes.** Page text and transcripts are cut at 20,000 characters each.
+- **Runs with one Docker command,** or with a manual install.
 
-In the run shown in the screenshot above, the YouTube branch went 40 videos → 23 after the hard filter → 15 selected → 13 with a transcript, and the web branch selected 15 pages (3 GitHub, 12 others).
-
-### YouTube branch in detail
+### YouTube videos branch in detail
 
 **1. Query intents.** `Youtube Query1` must write five queries, one for each of these:
 
@@ -126,7 +82,7 @@ In the run shown in the screenshot above, the YouTube branch went 40 videos → 
 
 **6. Extract packs.** `EP Youtube` receives all transcripts in one request and writes, per video: why it was selected, key takeaways, claims, steps and keywords (at most 5 bullets each).
 
-### Web branch in detail
+### Web search branch in detail
 
 **1. Topic category and query intents.** `Website Query1` first writes a short brief of what it already knows and a list of open questions (used only to shape the queries; they are not written to the document). It then picks exactly one category and writes one query per intent of that category:
 
@@ -189,14 +145,31 @@ The prompt gives the model the bucket names only; the right-hand column is the p
 
 **7. Extract packs.** `EP Website` summarizes two pages per request and writes, per page: why it was selected, key takeaways, claims, data points, steps and keywords (at most 6 bullets each). The result is joined back to its bucket and search term by URL.
 
-### What is written to the Google Doc
+### Output Structure on Gdocs
 
+```text
+Search term: github.com transformer fine tuning example python pytorch
+Bucket: THEORY
+URL : https://github.com/huggingface/transformers
+Tittle : GitHub - huggingface/transformers: 🤗 Transformers
+Score: 93.1
+
+Why Selected: Highest relevance score; official repository of the Hugging Face Transformers library ...
+Key Takeaway: Official Hugging Face Transformers library repository.; Provides thousands of pretrained models ...
+Potential Keyword: Transformers, Hugging Face, pretrained models, NLP, PyTorch, TensorFlow, JAX
+```
 | Source | Fields |
 |---|---|
 | Web page | Search term, Bucket, URL, Title, Score (`weighted_score`), Why Selected, Key Takeaway, Potential Keyword |
 | Video | URL, Title, Score (0–100 rubric), Why Selected, Key Takeaway, Potential Keyword |
 
-## Files
+## Example output
+| Topic sent | Result |
+|---|---|
+| Transformer Architecture fine tuning | [Google Doc](https://docs.google.com/document/d/1tBiWvBboDd1dzI4dlnmaBDgQtd6NRzn8VPjw97e2kcw/edit?usp=sharing) (8 videos, 12 web pages) |
+| How to implement AdaBoost from scratch | [Google Doc](https://docs.google.com/document/d/1L02Z-YFH6cUe6tWe3gBLbQsDRZFFyAK6gRG7ggeMGZE/edit?usp=sharing) (7 videos, 10 web pages) |
+
+## Files Directory
 
 ```text
 topic-scraper/
@@ -216,18 +189,7 @@ topic-scraper/
 └── README.md
 ```
 
-| File | What it does |
-|---|---|
-| `FINAL TOPIC SCRAPER.json` | The workflow (66 nodes). Import it into n8n. It contains no API keys; nodes only name the n8n credential they expect. |
-| `docker-compose.yml` | Defines two containers: `n8n` (the official n8n image, editor on `http://localhost:5678`, data in the `n8n_data` volume) and `transcript` (the bridge below). |
-| `Dockerfile` | Builds the `transcript` container: Python 3.12, the packages from `requirements.txt`, and the two transcript scripts. |
-| `.env.example` | Optional. Copy to `.env` to pull images through a mirror or to pin the n8n version. Holds no keys. |
-| `.dockerignore` | Keeps screenshots, the workflow file and `.env` out of the Docker build. |
-| `requirements.txt` | `requests` (for `trigger.py`) and `youtube-transcript-api` 1.x (for `YoutubeTranscript.py`). |
-| `YoutubeTranscript.py` | `python YoutubeTranscript.py <video_id>`. Waits a random 15 to 40 seconds, fetches the English transcript, and prints exactly one line of JSON: `{"status": "success", "video_id", "transcript"}` or `{"status": "error", "video_id", "message"}`. |
-| `transcript_server.py` | The transcript bridge. n8n cannot run Python, so the `Transcript Python` node calls this small HTTP server instead. `GET /transcript?video_id=<id>` runs `YoutubeTranscript.py` and returns its output; `GET /health` returns `{"status": "ok"}`. Listens on port 8765. |
-| `trigger.py` | `python trigger.py "your topic"`. Function `trigger(topic)` posts `{"topic": ...}` to the webhook and reports whether n8n accepted it. With no argument it asks for the topic. |
-| `.gitignore` | Keeps `.env`, `cookies.txt` and Python cache files out of git. |
+## Installation
 
 ## What you need
 
@@ -240,8 +202,6 @@ Accounts and keys:
 | [Google Cloud](https://console.cloud.google.com) | YouTube search, Google Docs | A project with the **YouTube Data API v3**, **Google Docs API** and **Google Drive API** enabled, and an OAuth client ID (type: Web application) |
 
 You can use local LLLM like Ollama or other LLM API that is supported by N8N, You only need to change raw text of some nodes after the LLM call
-
-## Installation
 
 There are two ways to install this repo:
 
@@ -301,7 +261,7 @@ There are two ways to install this repo:
    python transcript_server.py
    ```
 
-   ![transcript_server.py running, with requests from n8n in the terminal](Transcript%20Server.png)
+   ![transcript_server.py running, with requests from n8n in the terminal](img/Transcript%20Server.png)
 
 4. Check the address n8n uses to reach the bridge. After importing the workflow (next section), open the `Transcript Python` node:
 
@@ -355,7 +315,7 @@ Do this once, for either option.
    python trigger.py "Kalman filter"
    ```
 
-   ![trigger.py sending a topic and n8n accepting it](Trigger.py.png)
+   ![trigger.py sending a topic and n8n accepting it](img/Trigger.py.png)
 
    Without Python, on macOS or Linux:
 
@@ -374,7 +334,7 @@ Do this once, for either option.
 `/webhook-test/search` is n8n's test address: it answers once after each click of **Execute workflow**. To run without clicking, activate (publish) the workflow and use `http://localhost:5678/webhook/search` instead. In `trigger.py` that is the `WEBHOOK_URL` line.
 
 
-## Things to know
+## Notes:
 
 - **Transcripts are slow on purpose.** `YoutubeTranscript.py` waits a random 15 to 40 seconds before each request so YouTube does not block your IP address. For 15 videos that is about 4 to 10 minutes. Do not remove the delay.
 - **Transcripts are English only.** Videos without English captions are skipped, not treated as errors.
