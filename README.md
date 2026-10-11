@@ -2,7 +2,7 @@
 
 An [n8n](https://n8n.io) workflow that turns a study topic into a research brief. You send it a topic; it searches YouTube and the web, filters and ranks what it finds, reads the best sources (full video transcripts and full page text), and writes a summary of each one into a new Google Doc. You can use RAG like NotebookLLM for supporting your further studies. 
 
-![The workflow on the n8n canvas](N8N%20.png)
+![The workflow on the n8n canvas](img/N8N%20.png)
 
 ## Example output
 
